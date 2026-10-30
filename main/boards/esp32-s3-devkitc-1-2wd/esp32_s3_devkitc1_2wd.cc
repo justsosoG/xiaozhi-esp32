@@ -12,14 +12,17 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 
 namespace {
+static const char* kTag = "DevKitC1_2WD";
 constexpr uint32_t kPwmMaximumDuty = 1023;
 constexpr int kDefaultSpeedPercent = 35;
 constexpr int kMinimumSpeedPercent = 20;
@@ -30,7 +33,7 @@ constexpr ledc_timer_t kMotorPwmTimer = LEDC_TIMER_1;
 constexpr ledc_channel_t kMotorLeftPwmChannel = LEDC_CHANNEL_2;
 constexpr ledc_channel_t kMotorRightPwmChannel = LEDC_CHANNEL_3;
 constexpr EventBits_t kMotorStopEvent = BIT0;
-constexpr uint32_t kMotorStopTaskStackSize = configMINIMAL_STACK_SIZE;
+constexpr uint32_t kMotorStopTaskStackSize = 2048;
 enum class Motion { Forward, Backward, Left, Right };
 
 /** 封装 TB6612 两路方向/PWM 控制，并用定时器提供自动停车保护。 */
@@ -60,13 +63,20 @@ public:
             }, .arg = this,
             .dispatch_method = ESP_TIMER_TASK, .name = "motor_stop", .skip_unhandled_events = true};
         ESP_ERROR_CHECK(esp_timer_create(&args, &stop_timer_));
-        stop_task_ = xTaskCreateStatic(StopTask, "motor_stop_task", kMotorStopTaskStackSize, this,
-                                       tskIDLE_PRIORITY + 1, stop_task_stack_, &stop_task_buffer_);
-        configASSERT(stop_task_ != nullptr);
+        // 任务栈必须由 FreeRTOS 动态分配：xTaskCreateStatic 要求 TCB 位于内部 RAM，
+        // 而板上内部 RAM 不满足 xPortCheckValidTCBMem() 的字节可访问要求，会触发 assert。
+        if (xTaskCreate(StopTask, "motor_stop_task", kMotorStopTaskStackSize, this,
+                        tskIDLE_PRIORITY + 1, &stop_task_) != pdPASS) {
+            ESP_LOGE(kTag, "Failed to create motor stop task");
+        }
     }
     ~MotorController() {
         Stop();
-        vTaskDelete(stop_task_);
+        // 停止定时器并等回调退出的路径依赖任务仍存活，必须先删任务再删事件组。
+        if (stop_task_ != nullptr) {
+            vTaskDelete(stop_task_);
+            stop_task_ = nullptr;
+        }
         esp_timer_delete(stop_timer_);
         vEventGroupDelete(stop_event_group_);
     }
@@ -87,6 +97,10 @@ public:
         SetPwm(kMotorLeftPwmChannel, duty);
         SetPwm(kMotorRightPwmChannel, duty);
         gpio_set_level(MOTOR_STBY_GPIO, 1);
+        // esp_timer_stop() 不等待回调返回。若上一条动作的停车回调已排在 esp_timer 任务队列里，
+        // 它仍会在线程被调度后投递停车事件。这里记下本次动作的绝对截止时刻，停车事件到达时
+        // 用当前时间判断它是否属于本次动作；早于截止时刻的一律是过期事件，直接丢弃。
+        deadline_us_.store(esp_timer_get_time() + duration_ms * 1000LL);
         ESP_ERROR_CHECK(esp_timer_start_once(stop_timer_, duration_ms * 1000ULL));
     }
     void Stop() {
@@ -100,10 +114,10 @@ public:
     }
 private:
     std::mutex mutex_;
+    // 本次动作的绝对截止时刻（微秒）。停车任务据此识别并丢弃上一条动作遗留的超时事件。
+    std::atomic<int64_t> deadline_us_{0};
     esp_timer_handle_t stop_timer_ = nullptr;
     EventGroupHandle_t stop_event_group_ = nullptr;
-    StaticTask_t stop_task_buffer_;
-    StackType_t stop_task_stack_[kMotorStopTaskStackSize];
     TaskHandle_t stop_task_ = nullptr;
 
     static void StopTask(void* context) {
@@ -111,6 +125,10 @@ private:
         while (true) {
             xEventGroupWaitBits(self->stop_event_group_, kMotorStopEvent, pdTRUE, pdFALSE,
                                 portMAX_DELAY);
+            // 早于本次动作截止时刻的停车事件属于上一条动作，丢弃，避免误停刚发起的新动作。
+            if (esp_timer_get_time() < self->deadline_us_.load()) {
+                continue;
+            }
             self->Stop();
         }
     }
@@ -162,6 +180,7 @@ public:
             AUDIO_CODEC_ES7210_ADDR, AUDIO_INPUT_REFERENCE);
         return &codec;
     }
+
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     LcdDisplay* display_ = nullptr;

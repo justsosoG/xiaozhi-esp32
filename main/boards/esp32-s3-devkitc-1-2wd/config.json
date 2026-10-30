@@ -3,6 +3,9 @@
     "target": "esp32s3",
     "builds": [{
         "name": "esp32-s3-devkitc-1-2wd",
-        "sdkconfig_append": ["CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD=y"]
+        "sdkconfig_append": [
+            "CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD=y",
+            "CONFIG_USE_DEVICE_AEC=y"
+        ]
     }]
 }
