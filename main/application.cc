@@ -1,4 +1,5 @@
 #include "application.h"
+#include "alarm_manager.h"
 #include "assets.h"
 #include "assets/lang_config.h"
 #include "audio_codec.h"
@@ -18,6 +19,7 @@
 #include <cJSON.h>
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <limits>
 
 #define TAG "Application"
@@ -105,6 +107,13 @@ void Application::Initialize() {
 
     // Start the clock timer to update the status bar
     esp_timer_start_periodic(clock_timer_handle_, 1000000);
+
+    // Local alarm clock: load persisted alarms and register the ring actions with the main task.
+    auto& alarm_manager = AlarmManager::GetInstance();
+    alarm_manager.Initialize();
+    alarm_manager.SetRingCallbacks(
+        [this](const Alarm& alarm) { StartAlarmRing(alarm.label); },
+        [this]() { ReplayAlarmSound(); }, [this]() { StopAlarmRing(); });
 
     // Add MCP common tools (only once during initialization)
     auto& mcp_server = McpServer::GetInstance();
@@ -283,6 +292,7 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_CLOCK_TICK) {
             clock_ticks_++;
+            AlarmManager::GetInstance().OnClockTick(time(nullptr), has_server_time_);
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
@@ -1238,6 +1248,7 @@ void Application::StartNotification(std::string audio_url, std::vector<NotifySub
 }
 
 void Application::StopNotification() {
+    AlarmManager::GetInstance().StopRinging();
     notify_player_.Stop();
     audio_service_.ResetDecoder();
     auto& board = Board::GetInstance();
@@ -1464,4 +1475,40 @@ void Application::ResetProtocol() {
         // Reset protocol
         protocol_.reset();
     });
+}
+
+void Application::StartAlarmRing(const std::string& label) {
+    // 闹钟优先：如果正在播报/聆听，先回到 idle（这些状态到 idle 的转换都是合法的），
+    // 再进入 notifying 状态响铃。
+    if (GetDeviceState() != kDeviceStateIdle) {
+        SetDeviceState(kDeviceStateIdle);
+    }
+    if (!SetDeviceState(kDeviceStateNotifying)) {
+        ESP_LOGW(TAG, "Failed to enter notifying state for alarm");
+        return;
+    }
+    auto display = Board::GetInstance().GetDisplay();
+    std::string message = "⏰ ";
+    message += label;
+    display->SetChatMessage("assistant", message.c_str());
+    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+}
+
+void Application::ReplayAlarmSound() {
+    if (GetDeviceState() != kDeviceStateNotifying) {
+        return;
+    }
+    if (!audio_service_.IsPlaybackIdle()) {
+        return;
+    }
+    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+}
+
+void Application::StopAlarmRing() {
+    if (GetDeviceState() != kDeviceStateNotifying) {
+        return;
+    }
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetChatMessage("assistant", "");
+    SetDeviceState(kDeviceStateIdle);
 }

@@ -15,6 +15,7 @@
 #include "application.h"
 #include "board.h"
 #include "display.h"
+#include "alarm_manager.h"
 #include "lvgl_image.h"
 #include "lvgl_theme.h"
 #include "settings.h"
@@ -115,6 +116,10 @@ void McpServer::AddCommonTools() {
                 });
     }
 #endif
+
+    // Device-local alarm clock tools (self.alarm.*), persisted in NVS and driven by the
+    // application's 1 Hz clock tick. They are common tools, not board-specific ones.
+    AlarmManager::GetInstance().RegisterTools(*this);
 
     // Restore the original tools list to the end of the tools list
     tools_.insert(tools_.end(), std::make_move_iterator(original_tools.begin()),

@@ -192,6 +192,11 @@ private:
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
+
+    // Local alarm clock actions (all executed in the main task)
+    void StartAlarmRing(const std::string& label);
+    void ReplayAlarmSound();
+    void StopAlarmRing();
 };
 
 
