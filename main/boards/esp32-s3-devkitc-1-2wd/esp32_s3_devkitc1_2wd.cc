@@ -28,7 +28,8 @@ constexpr int kDefaultSpeedPercent = 35;
 constexpr int kMinimumSpeedPercent = 20;
 constexpr int kMaximumSpeedPercent = 80;
 constexpr int kDefaultDurationMs = 800;
-constexpr int kMaxDurationMs = 3000;
+// 单次动作上限 30s：仍是有限时长，到点由定时器自动停车，避免小车失控。
+constexpr int kMaxDurationMs = 30000;
 constexpr ledc_timer_t kMotorPwmTimer = LEDC_TIMER_1;
 constexpr ledc_channel_t kMotorLeftPwmChannel = LEDC_CHANNEL_2;
 constexpr ledc_channel_t kMotorRightPwmChannel = LEDC_CHANNEL_3;
