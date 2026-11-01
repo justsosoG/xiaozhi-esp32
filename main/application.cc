@@ -1491,7 +1491,7 @@ void Application::StartAlarmRing(const std::string& label) {
     std::string message = "⏰ ";
     message += label;
     display->SetChatMessage("assistant", message.c_str());
-    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+    audio_service_.PlaySound(Lang::Sounds::OGG_ALARM);
 }
 
 void Application::ReplayAlarmSound() {
@@ -1501,7 +1501,7 @@ void Application::ReplayAlarmSound() {
     if (!audio_service_.IsPlaybackIdle()) {
         return;
     }
-    audio_service_.PlaySound(Lang::Sounds::OGG_EXCLAMATION);
+    audio_service_.PlaySound(Lang::Sounds::OGG_ALARM);
 }
 
 void Application::StopAlarmRing() {

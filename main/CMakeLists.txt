@@ -1253,6 +1253,8 @@ add_custom_command(
         ${LANG_JSON}
         ${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/en-US/language.json
         ${PROJECT_DIR}/scripts/gen_lang.py
+        ${LANG_SOUNDS}
+        ${COMMON_SOUNDS}
     COMMENT "Generating ${LANG_DIR} language config"
 )
 
