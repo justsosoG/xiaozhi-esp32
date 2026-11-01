@@ -211,6 +211,19 @@ choice BOARD_TYPE
     config BOARD_TYPE_ESP32_S3_DEVKITC1_2WD
         bool "ESP32-S3-DevKitC-1 2WD (ES7210+ES8311+TB6612FNG 双轮桌面小车)"
         depends on IDF_TARGET_ESP32S3
+    choice DISPLAY_2WD_TYPE
+        depends on BOARD_TYPE_ESP32_S3_DEVKITC1_2WD
+        prompt "2WD display type"
+        default 2WD_DISPLAY_LCD
+        help
+            Display type of the ESP32-S3-DevKitC-1 2WD board. The LCD uses the
+            ST7789 SPI panel; the OLED is a 0.96 inch SSD1306 128x64 panel on the
+            shared codec I2C bus (GPIO1/2).
+        config 2WD_DISPLAY_LCD
+            bool "ST7789 240x320 SPI LCD"
+        config 2WD_DISPLAY_SSD1306_128X64
+            bool "SSD1306 128x64 I2C OLED (0.96 inch)"
+    endchoice
     config BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD
         bool "Espressif ESP32-P4/P4X-Function-EV-Board"
         depends on IDF_TARGET_ESP32P4

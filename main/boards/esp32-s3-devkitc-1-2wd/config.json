@@ -1,11 +1,22 @@
 {
     "type": "esp32-s3-devkitc-1-2wd",
     "target": "esp32s3",
-    "builds": [{
-        "name": "esp32-s3-devkitc-1-2wd",
-        "sdkconfig_append": [
-            "CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD=y",
-            "CONFIG_USE_DEVICE_AEC=y"
-        ]
-    }]
+    "builds": [
+        {
+            "name": "esp32-s3-devkitc-1-2wd",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD=y",
+                "CONFIG_USE_DEVICE_AEC=y",
+                "CONFIG_2WD_DISPLAY_LCD=y"
+            ]
+        },
+        {
+            "name": "esp32-s3-devkitc-1-2wd-oled",
+            "sdkconfig_append": [
+                "CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD=y",
+                "CONFIG_USE_DEVICE_AEC=y",
+                "CONFIG_2WD_DISPLAY_SSD1306_128X64=y"
+            ]
+        }
+    ]
 }

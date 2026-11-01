@@ -1,6 +1,8 @@
 # ESP32-S3-DevKitC-1 双轮小车
 
-LCD（复用 bread-compact-wifi-lcd）：`MOSI=47`、`CLK=21`、`DC=40`、`RST=45`、`CS=41`、背光 `42`。
+默认屏幕：ST7789 SPI LCD（复用 bread-compact-wifi-lcd 接线）：`MOSI=47`、`CLK=21`、`DC=40`、`RST=45`、`CS=41`、背光 `42`。
+
+可选屏幕：0.96 寸 SSD1306 128×64 OLED（4 线 I2C）。直接并在 codec 的 I2C 总线上：`SDA=1`、`SCL=2`、`VCC` 接 3.3V、`GND` 共地；I2C 地址 `0x3C`（少数模块为 `0x3D`，固件会两个都尝试）。OLED 版没有背光，UI 为单色文字/简单表情，对应构建变体 `esp32-s3-devkitc-1-2wd-oled`。
 
 Codec：`SDA=1`、`SCL=2`、`MCK=15`、`BCK=5`、`WS=4`、功放 `EN=38`。
 
@@ -12,4 +14,5 @@ TB6612：左路 `AIN1=8/AIN2=9/PWMA=10`，右路 `BIN1=11/BIN2=12/PWMB=13`，`ST
 
 MCP 工具：`self.chassis.forward`、`backward`、`turn_left`、`turn_right`、`stop`。移动默认 800ms、PWM 速度 35%，可选速度范围 20–80%，动作时长范围 100–30000ms（单次最长 30 秒），超时自动停车。PWM 百分比不等于精确 RPM，实际速度会随负载和电池电压变化。
 
-构建：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd --wake-word nihaoxiaozhi`。唤醒词为"你好小智"（S3 上对应模型 `wn9_nihaoxiaozhi_tts`）；不传 `--wake-word` 时默认是 `hiesp`（Hi ESP）。如需中文界面与提示音，再加 `--language zh-CN`。
+构建（LCD 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd --wake-word nihaoxiaozhi`。
+构建（OLED 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd-oled --wake-word nihaoxiaozhi`。两个变体共用同一套板卡代码，通过 `CONFIG_2WD_DISPLAY_*` 选择屏幕。唤醒词为"你好小智"（S3 上对应模型 `wn9_nihaoxiaozhi_tts`）；不传 `--wake-word` 时默认是 `hiesp`（Hi ESP）。如需中文界面与提示音，再加 `--language zh-CN`。

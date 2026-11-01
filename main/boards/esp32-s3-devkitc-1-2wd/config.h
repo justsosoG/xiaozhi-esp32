@@ -27,6 +27,14 @@
 #define MOTOR_PWMB_GPIO GPIO_NUM_13
 #define MOTOR_STBY_GPIO GPIO_NUM_14
 
+#ifdef CONFIG_2WD_DISPLAY_SSD1306_128X64
+// 0.96 寸 SSD1306 128x64 OLED。4 线 I2C 与 codec 共用 GPIO1/2 总线，
+// 地址 0x3C（少数模块为 0x3D），VCC 接 3.3V，无背光。
+#define DISPLAY_WIDTH 128
+#define DISPLAY_HEIGHT 64
+#define DISPLAY_MIRROR_X true
+#define DISPLAY_MIRROR_Y true
+#else
 // 复用 bread-compact-wifi-lcd 原板的 ST7789 SPI LCD 接线。
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_42
 #define DISPLAY_MOSI_PIN GPIO_NUM_47
@@ -46,4 +54,5 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 #define DISPLAY_SPI_MODE 0
 #define LCD_TYPE_ST7789_SERIAL
+#endif
 #endif

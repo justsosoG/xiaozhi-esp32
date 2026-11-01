@@ -12,6 +12,11 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
+#ifdef CONFIG_2WD_DISPLAY_SSD1306_128X64
+#include <esp_lcd_io_i2c.h>
+#include <esp_lcd_panel_ssd1306.h>
+#include "display/oled_display.h"
+#endif
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -153,13 +158,19 @@ private:
 class Esp32S3DevKitC1TwoWheelBoard : public WifiBoard {
 public:
     Esp32S3DevKitC1TwoWheelBoard() : motors_() {
+#ifdef CONFIG_2WD_DISPLAY_SSD1306_128X64
+        // OLED 与 codec 共用 I2C 总线，先把总线建好再初始化屏幕。
+        InitializeCodecI2c();
+        InitializeOledDisplay();
+#else
         // 初始化顺序与原 bread-compact-wifi-lcd 板一致：先显示，再音频和电机工具。
         InitializeSpi();
         InitializeLcdDisplay();
         InitializeCodecI2c();
-        RegisterMotorTools();
         // 恢复已保存的屏幕亮度；首次启动时使用 Backlight 的默认亮度。
         GetBacklight()->RestoreBrightness();
+#endif
+        RegisterMotorTools();
     }
 
     Led* GetLed() override {
@@ -170,8 +181,13 @@ public:
     Display* GetDisplay() override { return display_; }
 
     Backlight* GetBacklight() override {
+#ifdef CONFIG_2WD_DISPLAY_SSD1306_128X64
+        // OLED 没有背光。
+        return nullptr;
+#else
         static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
         return &backlight;
+#endif
     }
     AudioCodec* GetAudioCodec() override {
         // 复用项目已有的 ES7210 ADC + ES8311 DAC 全双工实现。
@@ -184,9 +200,10 @@ public:
 
 private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
-    LcdDisplay* display_ = nullptr;
+    Display* display_ = nullptr;
     MotorController motors_;
 
+#ifndef CONFIG_2WD_DISPLAY_SSD1306_128X64
     void InitializeSpi() {
         // LCD 使用 SPI3；MISO 不接线，发送缓冲区放入 DMA 以保证刷屏稳定。
         spi_bus_config_t bus_config = {};
@@ -228,6 +245,56 @@ private:
                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
                                       DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
+#else
+    void InitializeOledDisplay() {
+        // 0.96 寸 SSD1306 128x64，与 ES8311/ES7210 共用 GPIO1/2 的 I2C 总线。
+        // 模块常见地址 0x3C，少数 0x3D；两个都试一下，找不到就退化为 NoDisplay。
+        for (uint8_t address : {0x3C, 0x3D}) {
+            esp_lcd_panel_io_i2c_config_t io_config = {};
+            io_config.dev_addr = address;
+            io_config.control_phase_bytes = 1;
+            io_config.dc_bit_offset = 6;
+            io_config.lcd_cmd_bits = 8;
+            io_config.lcd_param_bits = 8;
+            io_config.scl_speed_hz = 400 * 1000;
+            esp_lcd_panel_io_handle_t panel_io = nullptr;
+            if (esp_lcd_new_panel_io_i2c(i2c_bus_, &io_config, &panel_io) != ESP_OK) {
+                continue;
+            }
+            esp_lcd_panel_dev_config_t panel_config = {};
+            panel_config.reset_gpio_num = GPIO_NUM_NC;
+            panel_config.bits_per_pixel = 1;
+            esp_lcd_panel_ssd1306_config_t ssd1306_config = {
+                .height = static_cast<uint8_t>(DISPLAY_HEIGHT),
+                .contrast = 128,
+            };
+            panel_config.vendor_config = &ssd1306_config;
+            esp_lcd_panel_handle_t panel = nullptr;
+            if (esp_lcd_new_panel_ssd1306(panel_io, &panel_config, &panel) != ESP_OK) {
+                esp_lcd_panel_io_del(panel_io);
+                continue;
+            }
+            esp_err_t err = esp_lcd_panel_reset(panel);
+            if (err == ESP_OK) {
+                err = esp_lcd_panel_init(panel);
+            }
+            if (err != ESP_OK) {
+                ESP_LOGE(kTag, "SSD1306 init failed at 0x%02X", address);
+                esp_lcd_panel_del(panel);
+                esp_lcd_panel_io_del(panel_io);
+                continue;
+            }
+            ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, false));
+            ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+            display_ = new OledDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                       DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+            ESP_LOGI(kTag, "SSD1306 128x64 OLED initialized at 0x%02X", address);
+            return;
+        }
+        ESP_LOGE(kTag, "No SSD1306 OLED found, falling back to NoDisplay");
+        display_ = new NoDisplay();
+    }
+#endif
     void InitializeCodecI2c() {
         const i2c_master_bus_config_t cfg = {.i2c_port = I2C_NUM_0,
             .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN, .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
