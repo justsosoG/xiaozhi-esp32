@@ -15,7 +15,7 @@
 #ifdef CONFIG_2WD_DISPLAY_SSD1306_128X64
 #include <esp_lcd_io_i2c.h>
 #include <esp_lcd_panel_ssd1306.h>
-#include "display/oled_display.h"
+#include "display/eyes_display.h"
 #endif
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -286,7 +286,7 @@ private:
             }
             ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, false));
             ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
-            display_ = new OledDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+            display_ = new EyesDisplay(panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                        DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
             ESP_LOGI(kTag, "SSD1306 128x64 OLED initialized at 0x%02X", address);
             return;
