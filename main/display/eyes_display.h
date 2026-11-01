@@ -8,12 +8,12 @@
 
 #include <cstdint>
 
-// 128x64 单色 OLED 上的"眼睛 + 嘴"动画脸：
+// 128x64 单色 OLED 上的"两只眼睛"动画界面：
 // - 空闲时随机眨眼、视线游走，像活着一样
-// - SetEmotion 切换表情：每种情绪有独立的眼型、嘴型、眨眼节奏和微动作
-//   （开心眯眼笑、大笑张嘴、难过撇嘴、流泪、生气、惊讶、困倦、
-//     思考、单眼眨、爱心、亲亲、酷、做鬼脸、疑惑、害羞、好吃、放松、自信）
-// - 说话时嘴巴一张一合，眼睛轻微浮动
+// - SetEmotion 切换表情：每种情绪有独立的眼型、眨眼节奏和微动作
+//   （开心眯眼跳动、大笑抖动、难过流泪、生气颤抖、惊讶睁大、困倦、
+//     思考、眨眼单眼、爱心、亲亲、酷、做鬼脸、疑惑、害羞、好吃、放松、自信）
+// - 聆听时注视前方，说话时轻微上下浮动，响铃时睁大
 // - 底部保留一行文字，用于状态/对话字幕
 class EyesDisplay : public LvglDisplay {
 public:
@@ -63,37 +63,23 @@ private:
         Confident,
     };
 
-    enum class MouthShape {
-        Bar,    // 圆角横条
-        Oval,   // 椭圆（张嘴/惊讶/亲吻）
-        Dot,    // 小圆点
-        Smile,  // 上弯月牙（笑）
-        Frown,  // 下弯（撇嘴）
-        Wave,   // 波浪（鬼脸/疑惑）
-    };
-
-    // 一种表情的静态参数：眼型、嘴型、偏移、视线、浮动/抖动节奏、眨眼间隔等。
+    // 一种表情的静态参数：眼型、偏移、视线、浮动/抖动节奏、眨眼间隔等。
     struct ExpressionProfile {
-        float left_h;         // 左眼基础高度（px）
-        float right_h;        // 右眼基础高度（px）
-        float left_y_off;     // 左眼垂直偏移（px）
-        float right_y_off;    // 右眼垂直偏移（px）
-        float inset;          // >0 时双眼向中间靠拢（px）
-        float gaze_x;         // 视线水平偏置（px）
-        float gaze_y;         // 视线垂直偏置（px）
-        float bob_amp;        // 上下浮动幅度（px）
-        float bob_freq;       // 上下浮动相位增量（rad/帧）
-        float shake_amp;      // 左右抖动幅度（px）
-        float shake_freq;     // 左右抖动相位增量（rad/帧）
-        uint32_t blink_ms;    // 自动眨眼基础间隔（ms），0 表示不自动眨眼
-        bool tear;            // 是否显示眼泪
-        bool tear_continuous; // 眼泪是否连续流（否则滴一下停一会）
-        bool right_closed;    // 右眼保持闭合（winking）
-        MouthShape mouth;     // 嘴型
-        float mouth_w;        // 嘴宽（px）
-        float mouth_h;        // 嘴高/弯曲深度（px）
-        float mouth_dx;       // 嘴水平偏移（px）
-        float mouth_dy;       // 嘴垂直偏移（px）
+        float left_h;        // 左眼基础高度（px）
+        float right_h;       // 右眼基础高度（px）
+        float left_y_off;    // 左眼垂直偏移（px）
+        float right_y_off;   // 右眼垂直偏移（px）
+        float inset;         // >0 时双眼向中间靠拢（px）
+        float gaze_x;        // 视线水平偏置（px）
+        float gaze_y;        // 视线垂直偏置（px）
+        float bob_amp;       // 上下浮动幅度（px）
+        float bob_freq;      // 上下浮动相位增量（rad/帧）
+        float shake_amp;     // 左右抖动幅度（px）
+        float shake_freq;    // 左右抖动相位增量（rad/帧）
+        uint32_t blink_ms;   // 自动眨眼基础间隔（ms），0 表示不自动眨眼
+        bool tear;           // 是否显示眼泪
+        bool tear_continuous;// 眼泪是否连续流（否则滴一下停一会）
+        bool right_closed;   // 右眼保持闭合（winking）
     };
 
     static const ExpressionProfile& ProfileFor(Expression expression);
@@ -103,8 +89,6 @@ private:
     lv_obj_t* left_eye_ = nullptr;
     lv_obj_t* right_eye_ = nullptr;
     lv_obj_t* tear_ = nullptr;
-    lv_obj_t* mouth_bar_ = nullptr;
-    lv_obj_t* mouth_line_ = nullptr;
     lv_obj_t* text_label_ = nullptr;
     lv_timer_t* anim_timer_ = nullptr;
 
@@ -112,16 +96,12 @@ private:
     uint32_t text_hide_at_ms_ = 0;
 
     // 平滑后的眼型（向当前表情的目标值插值，实现自然过渡）。
-    float left_h_ = 28.0f;
-    float right_h_ = 28.0f;
+    float left_h_ = 30.0f;
+    float right_h_ = 30.0f;
     float left_y_off_ = 0.0f;
     float right_y_off_ = 0.0f;
     float left_open_ = 1.0f;
     float right_open_ = 1.0f;
-
-    // 平滑后的嘴型。
-    float mouth_w_ = 10.0f;
-    float mouth_h_ = 3.0f;
 
     // 视线。
     float gaze_x_ = 0.0f;
@@ -136,7 +116,6 @@ private:
     float shake_value_ = 0.0f;
     float speak_phase_ = 0.0f;
     float speak_bob_ = 0.0f;
-    float mouth_phase_ = 0.0f;
 
     // 眼泪动画进度 0..1。
     float tear_progress_ = 0.0f;
@@ -147,20 +126,16 @@ private:
     uint32_t next_blink_ms_ = 0;
     uint32_t next_gaze_ms_ = 0;
 
-    // 眼睛/嘴巴几何。
+    // 眼睛几何。
     int eye_width_ = 28;
-    int eye_center_y_ = 16;
+    int eye_center_y_ = 20;
     int left_center_x_ = 46;
     int right_center_x_ = 82;
-    int mouth_center_x_ = 64;
-    int mouth_center_y_ = 40;
-    lv_point_precise_t mouth_points_[5] = {};
 
     void SetupEyesUi();
     static void OnAnimTimer(lv_timer_t* timer);
     void Tick();
     void ApplyEyes();
-    void ApplyMouth();
     void UpdateTear(bool visible, bool continuous);
     void OnExpressionChanged();
     void ScheduleNextBlink(uint32_t now);
