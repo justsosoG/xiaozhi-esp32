@@ -14,5 +14,5 @@ TB6612：左路 `AIN1=8/AIN2=9/PWMA=10`，右路 `BIN1=11/BIN2=12/PWMB=13`，`ST
 
 MCP 工具：`self.chassis.forward`、`backward`、`turn_left`、`turn_right`、`stop`。移动默认 800ms、PWM 速度 35%，可选速度范围 20–80%，动作时长范围 100–30000ms（单次最长 30 秒），超时自动停车。PWM 百分比不等于精确 RPM，实际速度会随负载和电池电压变化。
 
-构建（LCD 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd --wake-word nihaoxiaozhi`。
-构建（OLED 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd-oled --wake-word nihaoxiaozhi`。两个变体共用同一套板卡代码，通过 `CONFIG_2WD_DISPLAY_*` 选择屏幕。唤醒词为"你好小智"（S3 上对应模型 `wn9_nihaoxiaozhi_tts`）；不传 `--wake-word` 时默认是 `hiesp`（Hi ESP）。如需中文界面与提示音，再加 `--language zh-CN`。
+构建（LCD 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd --language zh-CN --wake-word nihaoxiaozhi`。
+构建（OLED 版）：`python3 scripts/build.py esp32-s3-devkitc-1-2wd --name esp32-s3-devkitc-1-2wd-oled --language zh-CN --wake-word nihaoxiaozhi`。两个变体共用同一套板卡代码，通过 `CONFIG_2WD_DISPLAY_*` 选择屏幕。唤醒词为"你好小智"（S3 上对应模型 `wn9_nihaoxiaozhi_tts`）；不传 `--wake-word` 时默认是 `hiesp`（Hi ESP）。`--language zh-CN` 让界面文案和提示音为中文；去掉它则回退英文。OLED 版会内嵌 14px 中文点阵字库（单色屏不加载运行时字体资源）。

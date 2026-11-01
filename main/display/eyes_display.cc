@@ -19,6 +19,12 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 
+#ifdef HAS_OLED_CJK_FONT
+// 内嵌的 14px/1bpp 常用中文点阵字体（由 main/CMakeLists.txt EMBED_FILES 打包）。
+extern const char font_noto_sans_common_14_1_bin_start[]
+    asm("_binary_font_noto_sans_common_14_1_bin_start");
+#endif
+
 namespace {
 // 和 OledDisplay 保持一致：前景色用黑色，保证在现有面板/颜色映射下可见。
 inline lv_color_t ForegroundColor() { return lv_color_black(); }
@@ -52,6 +58,17 @@ EyesDisplay::EyesDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handl
     port_cfg.task_affinity = 1;
 #endif
     lvgl_port_init(&port_cfg);
+
+#ifdef HAS_OLED_CJK_FONT
+    // cbin 字体从 LVGL 堆分配，必须在 lvgl_port_init() 之后创建。
+    auto cjk_font = std::make_shared<LvglCBinFont>(
+        const_cast<char*>(font_noto_sans_common_14_1_bin_start));
+    if (cjk_font->font() != nullptr) {
+        dark_theme->set_text_font(cjk_font);
+    } else {
+        ESP_LOGW(TAG, "Embedded Chinese font is invalid, falling back to the built-in font");
+    }
+#endif
 
     ESP_LOGI(TAG, "Adding eyes display");
     const lvgl_port_display_cfg_t display_cfg = {

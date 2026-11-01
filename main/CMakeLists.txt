@@ -118,6 +118,14 @@ elseif(CONFIG_BOARD_TYPE_ESP32_S3_DEVKITC1_2WD)
         # Monochrome 128x64 OLED uses a smaller font and no color emoji assets.
         set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
         set(BUILTIN_ICON_FONT font_material_symbols_14_1)
+        # Monochrome displays skip the runtime font asset pipeline, so embed the 14px
+        # 1bpp common (Chinese) font directly for localized status text.
+        set(OLED_CJK_FONT "${PROJECT_DIR}/managed_components/78__xiaozhi-fonts/cbin/font_noto_sans_common_14_1.bin")
+        if(EXISTS "${OLED_CJK_FONT}")
+            set(OLED_EMBED_FILES "${OLED_CJK_FONT}")
+        else()
+            message(WARNING "OLED Chinese font is missing: ${OLED_CJK_FONT}")
+        endif()
     else()
         set(BUILTIN_TEXT_FONT font_noto_sans_basic_16_4)
         set(BUILTIN_ICON_FONT font_material_symbols_16_4)
@@ -1174,7 +1182,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${OLED_EMBED_FILES}
                                 "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/index.html"
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
@@ -1234,6 +1242,10 @@ if(NOT CMAKE_BUILD_EARLY_EXPANSION)
                         PRIVATE BUILTIN_TEXT_FONT=${BUILTIN_TEXT_FONT} BUILTIN_ICON_FONT=${BUILTIN_ICON_FONT}
                         PRIVATE TEXT_FONT_SIZE=${TEXT_FONT_SIZE} TEXT_FONT_BPP=${TEXT_FONT_BPP}
                         )
+    if(OLED_EMBED_FILES)
+        # The embedded common-charset font is used by the monochrome eyes display.
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE HAS_OLED_CJK_FONT=1)
+    endif()
     # ESP32-S3 LVGL builtin pool: PSRAM boards allocate it from PSRAM.
     # Boards that set CONFIG_SPIRAM=n must not keep the 1MB chip-default
     # pool as a .dram0.bss array (build.py also switches those variants
