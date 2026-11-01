@@ -37,6 +37,7 @@ set(SOURCES "audio/audio_codec.cc"
             "system_info.cc"
             "application.cc"
             "alarm_manager.cc"
+            "web_server.cc"
             "ota.cc"
             "settings.cc"
             "device_state_machine.cc"
@@ -1167,12 +1168,14 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
 endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                                "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/index.html"
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
                         esp_pm
                         esp_psram
                         esp_netif
+                        esp_http_server
                         esp_eth
                         esp_driver_gpio
                         esp_driver_uart

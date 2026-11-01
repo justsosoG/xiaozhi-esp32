@@ -21,13 +21,20 @@ struct Alarm {
     time_t last_fired_minute = 0;  // 运行期去重，不持久化
 };
 
+// 可选的闹钟铃声（资源在 main/assets/common/alarm_*.ogg）。
+struct RingtoneInfo {
+    const char* id;
+    const char* name;
+};
+
 // 闹钟管理器：负责闹钟的增删查、NVS 持久化、每秒钟的触发检查和响铃生命周期。
-// 所有方法都在主任务中被调用（MCP 工具回调也运行在主任务），因此无需额外加锁。
+// 所有方法都在主任务中被调用（MCP 工具回调、本地配置页的请求也经 Application::Schedule
+// 投递到主任务），因此无需额外加锁。
 class AlarmManager {
 public:
     static AlarmManager& GetInstance();
 
-    // 从 NVS 加载闹钟，在 Application::Initialize() 中调用一次。
+    // 从 NVS 加载闹钟与配置，在 Application::Initialize() 中调用一次。
     void Initialize();
 
     // 注册设备端 MCP 工具（self.alarm.set/list/cancel/stop/snooze）。
@@ -45,8 +52,19 @@ public:
 
     bool IsRinging() const { return ringing_; }
 
-    // 停止当前响铃（唤醒词打断、self.alarm.stop、60 秒超时都会走到这里）。
+    // 停止当前响铃（唤醒词打断、self.alarm.stop、超时都会走到这里）。
     void StopRinging();
+
+    // ---- 本地配置页（main/web_server.cc）使用的接口，必须在主任务调用 ----
+    static const std::vector<RingtoneInfo>& GetRingtones();
+    std::string GetRingtoneId() const { return ringtone_id_; }
+    bool SetRingtoneId(const std::string& id);
+    int GetRingDurationSeconds() const { return ring_duration_s_; }
+    bool SetRingDurationSeconds(int seconds);
+    std::string GetAlarmsJson() const;
+    bool AddAlarm(int hour, int minute, const std::string& repeat, const std::string& label,
+                  std::string& message);
+    bool RemoveAlarm(int index, std::string& message);
 
 private:
     AlarmManager() = default;
@@ -54,8 +72,7 @@ private:
     AlarmManager& operator=(const AlarmManager&) = delete;
 
     static constexpr size_t kMaxAlarms = 8;
-    static constexpr int64_t kRingTimeoutUs = 60LL * 1000 * 1000;   // 响铃 60 秒自动停
-    static constexpr int64_t kReplayIntervalUs = 3LL * 1000 * 1000; // 每 3 秒重播一次
+    static constexpr int64_t kReplayIntervalUs = 3LL * 1000 * 1000;  // 每 3 秒重播一次
 
     void Load();
     void Save();
@@ -68,6 +85,7 @@ private:
     static std::string FormatHourMinute(uint8_t hour, uint8_t minute);
     static std::string RepeatName(uint8_t repeat_mask);
     static bool ParseRepeat(const std::string& text, uint8_t& repeat_mask);
+    static const RingtoneInfo* FindRingtone(const std::string& id);
 
     std::vector<Alarm> alarms_;
     bool time_synced_ = false;
@@ -75,6 +93,8 @@ private:
     int64_t ring_started_us_ = 0;
     int64_t next_replay_us_ = 0;
     std::string ring_label_;
+    std::string ringtone_id_ = "star";
+    int ring_duration_s_ = 60;
     time_t snooze_epoch_ = 0;
     std::string snooze_label_;
 

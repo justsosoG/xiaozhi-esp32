@@ -83,6 +83,11 @@ public:
     void Schedule(std::function<void()>&& callback);
 
     /**
+     * Play an alarm ringtone preview (thread-safe, used by the local web page)
+     */
+    void PlayPreviewRingtone(const std::string& ringtone_id);
+
+    /**
      * Alert with status, message, emotion and optional sound
      */
     void Alert(const char* status, const char* message, const char* emotion = "", const std::string_view& sound = "");

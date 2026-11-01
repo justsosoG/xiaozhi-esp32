@@ -72,7 +72,14 @@ void AlarmManager::Load() {
         alarm.next_epoch = static_cast<time_t>(settings.GetInt(prefix + "next", 0));
         alarms_.push_back(std::move(alarm));
     }
-    ESP_LOGI(TAG, "Loaded %d alarm(s)", static_cast<int>(alarms_.size()));
+    ringtone_id_ = settings.GetString("ringtone", "star");
+    if (FindRingtone(ringtone_id_) == nullptr) {
+        ringtone_id_ = "star";
+    }
+    ring_duration_s_ =
+        std::clamp(static_cast<int>(settings.GetInt("ring_seconds", 60)), 30, 90);
+    ESP_LOGI(TAG, "Loaded %d alarm(s), ringtone '%s', ring %ds",
+             static_cast<int>(alarms_.size()), ringtone_id_.c_str(), ring_duration_s_);
 }
 
 void AlarmManager::Save() {
@@ -88,6 +95,8 @@ void AlarmManager::Save() {
         // 一次性闹钟的绝对触发时刻；2038 年前 int32 足够表示秒级时间戳。
         settings.SetInt(prefix + "next", static_cast<int>(alarms_[i].next_epoch));
     }
+    settings.SetString("ringtone", ringtone_id_);
+    settings.SetInt("ring_seconds", ring_duration_s_);
 }
 
 void AlarmManager::OnClockTick(time_t now, bool time_synced) {
@@ -95,8 +104,9 @@ void AlarmManager::OnClockTick(time_t now, bool time_synced) {
     const int64_t now_us = esp_timer_get_time();
 
     if (ringing_) {
-        if (now_us - ring_started_us_ >= kRingTimeoutUs) {
-            ESP_LOGI(TAG, "Alarm ring timeout after 60s");
+        if (now_us - ring_started_us_ >=
+            static_cast<int64_t>(ring_duration_s_) * 1000 * 1000) {
+            ESP_LOGI(TAG, "Alarm ring timeout after %ds", ring_duration_s_);
             StopRinging();
         } else if (on_replay_ != nullptr && now_us >= next_replay_us_) {
             next_replay_us_ = now_us + kReplayIntervalUs;
@@ -289,6 +299,118 @@ bool AlarmManager::ParseRepeat(const std::string& text, uint8_t& repeat_mask) {
     return false;
 }
 
+const std::vector<RingtoneInfo>& AlarmManager::GetRingtones() {
+    static const std::vector<RingtoneInfo> ringtones = {
+        {"star", "小星星"},
+        {"musicbox", "八音盒"},
+        {"voice", "闹钟响啦"},
+        {"beep", "经典蜂鸣"},
+        {"dingdong", "叮咚门铃"},
+    };
+    return ringtones;
+}
+
+const RingtoneInfo* AlarmManager::FindRingtone(const std::string& id) {
+    for (const auto& ringtone : GetRingtones()) {
+        if (id == ringtone.id) {
+            return &ringtone;
+        }
+    }
+    return nullptr;
+}
+
+bool AlarmManager::SetRingtoneId(const std::string& id) {
+    if (FindRingtone(id) == nullptr) {
+        return false;
+    }
+    ringtone_id_ = id;
+    Save();
+    return true;
+}
+
+bool AlarmManager::SetRingDurationSeconds(int seconds) {
+    if (seconds != 30 && seconds != 60 && seconds != 90) {
+        return false;
+    }
+    ring_duration_s_ = seconds;
+    Save();
+    return true;
+}
+
+std::string AlarmManager::GetAlarmsJson() const {
+    const time_t now = time(nullptr);
+    cJSON* root = cJSON_CreateObject();
+    cJSON* list = cJSON_AddArrayToObject(root, "alarms");
+    for (size_t i = 0; i < alarms_.size(); ++i) {
+        const Alarm& alarm = alarms_[i];
+        const time_t next =
+            alarm.repeat_mask == 0 ? alarm.next_epoch : NextRepeatOccurrence(alarm, now);
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "index", static_cast<double>(i + 1));
+        cJSON_AddNumberToObject(item, "hour", alarm.hour);
+        cJSON_AddNumberToObject(item, "minute", alarm.minute);
+        cJSON_AddStringToObject(item, "repeat", RepeatName(alarm.repeat_mask).c_str());
+        cJSON_AddStringToObject(item, "label", alarm.label.c_str());
+        cJSON_AddBoolToObject(item, "enabled", alarm.enabled);
+        cJSON_AddStringToObject(item, "next", FormatTime(next).c_str());
+        cJSON_AddItemToArray(list, item);
+    }
+    char* text = cJSON_PrintUnformatted(root);
+    std::string result = text != nullptr ? text : "{\"alarms\":[]}";
+    cJSON_free(text);
+    cJSON_Delete(root);
+    return result;
+}
+
+bool AlarmManager::AddAlarm(int hour, int minute, const std::string& repeat,
+                            const std::string& label, std::string& message) {
+    if (!time_synced_) {
+        message = "设备时间尚未同步（未联网），暂时无法设置闹钟。";
+        return false;
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        message = "时间参数不合法（hour 0-23，minute 0-59）。";
+        return false;
+    }
+    uint8_t repeat_mask = 0;
+    if (!ParseRepeat(repeat, repeat_mask)) {
+        message = "repeat 只能是 once、daily 或 weekdays。";
+        return false;
+    }
+    if (alarms_.size() >= kMaxAlarms) {
+        message = "闹钟数量已达上限（8 个），请先取消一个。";
+        return false;
+    }
+    Alarm alarm;
+    alarm.hour = static_cast<uint8_t>(hour);
+    alarm.minute = static_cast<uint8_t>(minute);
+    alarm.repeat_mask = repeat_mask;
+    alarm.label = label.empty() ? kDefaultLabel : label;
+    const time_t now = time(nullptr);
+    if (alarm.repeat_mask == 0) {
+        alarm.next_epoch = NextDailyOccurrence(alarm.hour, alarm.minute, now);
+    }
+    alarms_.push_back(alarm);
+    Save();
+    const time_t next =
+        alarm.repeat_mask == 0 ? alarm.next_epoch : NextRepeatOccurrence(alarm, now);
+    message = "已设置闹钟：" + RepeatName(alarm.repeat_mask) + " " +
+              FormatHourMinute(alarm.hour, alarm.minute) + "（" + alarm.label +
+              "），下次响铃 " + FormatTime(next) + "。";
+    return true;
+}
+
+bool AlarmManager::RemoveAlarm(int index, std::string& message) {
+    if (index < 1 || static_cast<size_t>(index) > alarms_.size()) {
+        message = "没有第 " + std::to_string(index) + " 个闹钟。";
+        return false;
+    }
+    alarms_.erase(alarms_.begin() + (index - 1));
+    Save();
+    message = "已取消第 " + std::to_string(index) + " 个闹钟。";
+    return true;
+}
+
 void AlarmManager::RegisterTools(McpServer& mcp) {
     mcp.AddTool(
         "self.alarm.set",
@@ -309,33 +431,11 @@ void AlarmManager::RegisterTools(McpServer& mcp) {
             Property("label", kPropertyTypeString, std::string("闹钟")),
         }),
         [this](const PropertyList& properties) -> ReturnValue {
-            if (!time_synced_) {
-                return std::string("错误：设备时间尚未同步（未联网），暂时无法设置闹钟。");
-            }
-            Alarm alarm;
-            alarm.hour = static_cast<uint8_t>(properties["hour"].value<int>());
-            alarm.minute = static_cast<uint8_t>(properties["minute"].value<int>());
-            if (!ParseRepeat(properties["repeat"].value<std::string>(), alarm.repeat_mask)) {
-                return std::string("错误：repeat 只能是 once、daily 或 weekdays。");
-            }
-            alarm.label = properties["label"].value<std::string>();
-            if (alarm.label.empty()) {
-                alarm.label = kDefaultLabel;
-            }
-            if (alarms_.size() >= kMaxAlarms) {
-                return std::string("错误：闹钟数量已达上限（8 个），请先取消一个。");
-            }
-            const time_t now = time(nullptr);
-            if (alarm.repeat_mask == 0) {
-                alarm.next_epoch = NextDailyOccurrence(alarm.hour, alarm.minute, now);
-            }
-            alarms_.push_back(alarm);
-            Save();
-            const time_t next = alarm.repeat_mask == 0 ? alarm.next_epoch
-                                                       : NextRepeatOccurrence(alarm, now);
-            return std::string("已设置闹钟：") + RepeatName(alarm.repeat_mask) + " " +
-                   FormatHourMinute(alarm.hour, alarm.minute) + "（" + alarm.label +
-                   "），下次响铃 " + FormatTime(next) + "。";
+            std::string message;
+            AddAlarm(properties["hour"].value<int>(), properties["minute"].value<int>(),
+                     properties["repeat"].value<std::string>(),
+                     properties["label"].value<std::string>(), message);
+            return message;
         });
 
     mcp.AddTool("self.alarm.list",
@@ -375,13 +475,9 @@ void AlarmManager::RegisterTools(McpServer& mcp) {
                         Save();
                         return std::string("已取消全部闹钟。");
                     }
-                    const int index = properties["index"].value<int>();
-                    if (index < 1 || static_cast<size_t>(index) > alarms_.size()) {
-                        return std::string("错误：没有第 ") + std::to_string(index) + " 个闹钟。";
-                    }
-                    alarms_.erase(alarms_.begin() + (index - 1));
-                    Save();
-                    return std::string("已取消第 ") + std::to_string(index) + " 个闹钟。";
+                    std::string message;
+                    RemoveAlarm(properties["index"].value<int>(), message);
+                    return message;
                 });
 
     mcp.AddTool("self.alarm.stop", "Stop the alarm that is currently ringing.", PropertyList(),

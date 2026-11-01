@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "system_info.h"
 #include "text_glyph_payload.h"
+#include "web_server.h"
 #include "websocket_protocol.h"
 
 #include <driver/gpio.h>
@@ -23,6 +24,23 @@
 #include <limits>
 
 #define TAG "Application"
+
+// Map the ringtone id stored by AlarmManager to its embedded OGG asset.
+static const std::string_view& AlarmSoundForRingtone(const std::string& id) {
+    if (id == "musicbox") {
+        return Lang::Sounds::OGG_ALARM_MUSICBOX;
+    }
+    if (id == "voice") {
+        return Lang::Sounds::OGG_ALARM_VOICE;
+    }
+    if (id == "beep") {
+        return Lang::Sounds::OGG_ALARM_BEEP;
+    }
+    if (id == "dingdong") {
+        return Lang::Sounds::OGG_ALARM_DINGDONG;
+    }
+    return Lang::Sounds::OGG_ALARM_STAR;
+}
 
 Application::Application() : notify_player_(audio_service_) {
     event_group_ = xEventGroupCreate();
@@ -51,6 +69,7 @@ Application::Application() : notify_player_(audio_service_) {
 }
 
 Application::~Application() {
+    WebServer::GetInstance().Stop();
     notify_player_.Stop();
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
@@ -335,9 +354,13 @@ void Application::HandleNetworkConnectedEvent() {
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar(true);
+
+    // Serve the local configuration page while the device is on the station network.
+    WebServer::GetInstance().Start();
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    WebServer::GetInstance().Stop();
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateNotifying) {
@@ -1491,7 +1514,8 @@ void Application::StartAlarmRing(const std::string& label) {
     std::string message = "⏰ ";
     message += label;
     display->SetChatMessage("assistant", message.c_str());
-    audio_service_.PlaySound(Lang::Sounds::OGG_ALARM);
+    audio_service_.PlaySound(
+        AlarmSoundForRingtone(AlarmManager::GetInstance().GetRingtoneId()));
 }
 
 void Application::ReplayAlarmSound() {
@@ -1501,7 +1525,8 @@ void Application::ReplayAlarmSound() {
     if (!audio_service_.IsPlaybackIdle()) {
         return;
     }
-    audio_service_.PlaySound(Lang::Sounds::OGG_ALARM);
+    audio_service_.PlaySound(
+        AlarmSoundForRingtone(AlarmManager::GetInstance().GetRingtoneId()));
 }
 
 void Application::StopAlarmRing() {
@@ -1511,4 +1536,11 @@ void Application::StopAlarmRing() {
     auto display = Board::GetInstance().GetDisplay();
     display->SetChatMessage("assistant", "");
     SetDeviceState(kDeviceStateIdle);
+}
+
+void Application::PlayPreviewRingtone(const std::string& ringtone_id) {
+    // Thread-safe: the caller may be the web server task.
+    Schedule([this, ringtone_id]() {
+        audio_service_.PlaySound(AlarmSoundForRingtone(ringtone_id));
+    });
 }
