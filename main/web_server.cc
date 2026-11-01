@@ -1,5 +1,7 @@
 #include "web_server.h"
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -7,6 +9,7 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <cJSON.h>
 #include <esp_app_desc.h>
@@ -38,6 +41,34 @@ namespace {
 constexpr int kWebServerPort = 80;
 constexpr size_t kMaxRequestBodySize = 1024;
 constexpr uint32_t kMainTaskTimeoutMs = 1500;
+
+// 底盘遥控参数范围与板卡 MotorController 的约束保持一致。
+constexpr int kChassisMinSpeedPercent = 20;
+constexpr int kChassisMaxSpeedPercent = 80;
+constexpr int kChassisDefaultSpeedPercent = 35;
+constexpr int kChassisDefaultDurationMs = 800;
+constexpr int kChassisMaxDurationMs = 30000;
+
+// 最近一次底盘动作，供 /api/status 反馈（HTTP 任务写、主任务读）。
+std::atomic<int> g_chassis_action{static_cast<int>(ChassisAction::Stop)};
+std::atomic<int> g_chassis_speed_percent{0};
+std::atomic<int64_t> g_chassis_until_us{0};
+
+const char* ChassisActionName(ChassisAction action) {
+    switch (action) {
+        case ChassisAction::Forward:
+            return "forward";
+        case ChassisAction::Backward:
+            return "backward";
+        case ChassisAction::TurnLeft:
+            return "turn_left";
+        case ChassisAction::TurnRight:
+            return "turn_right";
+        case ChassisAction::Stop:
+            return "stop";
+    }
+    return "stop";
+}
 
 struct OpResult {
     bool ok = false;
@@ -134,6 +165,16 @@ std::string BuildStatusJson() {
                             AlarmManager::GetInstance().GetRingtoneId().c_str());
     cJSON_AddNumberToObject(root, "ring_seconds",
                             AlarmManager::GetInstance().GetRingDurationSeconds());
+
+    // 底盘状态：供遥控页显示"当前在动/静止"。没有底盘的板卡回调未注册，
+    // 这里会一直报告 stop，不影响页面其它功能。
+    const auto chassis_action = static_cast<ChassisAction>(g_chassis_action.load());
+    const bool chassis_moving = chassis_action != ChassisAction::Stop &&
+                                esp_timer_get_time() < g_chassis_until_us.load();
+    cJSON* chassis = cJSON_AddObjectToObject(root, "chassis");
+    cJSON_AddBoolToObject(chassis, "moving", chassis_moving);
+    cJSON_AddStringToObject(chassis, "action", ChassisActionName(chassis_action));
+    cJSON_AddNumberToObject(chassis, "speed_percent", g_chassis_speed_percent.load());
     return JsonToString(root);
 }
 
@@ -167,6 +208,10 @@ WebServer& WebServer::GetInstance() {
     return instance;
 }
 
+void WebServer::SetChassisControlCallback(ChassisControlCallback callback) {
+    chassis_control_ = std::move(callback);
+}
+
 void WebServer::Start() {
     if (server_ != nullptr) {
         return;
@@ -188,6 +233,7 @@ void WebServer::Start() {
     static const httpd_uri_t uris[] = {
         {"/", HTTP_GET, IndexHandler, nullptr},
         {"/api/status", HTTP_GET, StatusHandler, nullptr},
+        {"/api/chassis", HTTP_POST, ChassisHandler, nullptr},
         {"/api/alarms", HTTP_GET, AlarmsGetHandler, nullptr},
         {"/api/alarms", HTTP_POST, AlarmsPostHandler, nullptr},
         {"/api/alarms", HTTP_DELETE, AlarmsDeleteHandler, nullptr},
@@ -224,6 +270,75 @@ esp_err_t WebServer::StatusHandler(httpd_req_t* req) {
         return SendFailure(req, "设备忙，请稍后重试", "503 Service Unavailable");
     }
     return SendJsonBody(req, json);
+}
+
+esp_err_t WebServer::ChassisHandler(httpd_req_t* req) {
+    auto& self = WebServer::GetInstance();
+    if (!self.chassis_control_) {
+        return SendFailure(req, "该设备不支持底盘遥控", "501 Not Implemented");
+    }
+    std::string body;
+    if (!ReadBody(req, body)) {
+        return SendFailure(req, "请求体无效");
+    }
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (root == nullptr) {
+        return SendFailure(req, "JSON 格式错误");
+    }
+
+    const cJSON* action_item = cJSON_GetObjectItem(root, "action");
+    const cJSON* speed_item = cJSON_GetObjectItem(root, "speed_percent");
+    const cJSON* duration_item = cJSON_GetObjectItem(root, "duration_ms");
+    const std::string action_name =
+        cJSON_IsString(action_item) ? action_item->valuestring : std::string();
+    int speed_percent =
+        cJSON_IsNumber(speed_item) ? speed_item->valueint : kChassisDefaultSpeedPercent;
+    int duration_ms = cJSON_IsNumber(duration_item) ? duration_item->valueint : 0;
+    cJSON_Delete(root);
+
+    ChassisAction action;
+    if (action_name == "stop") {
+        action = ChassisAction::Stop;
+    } else if (action_name == "forward") {
+        action = ChassisAction::Forward;
+    } else if (action_name == "backward") {
+        action = ChassisAction::Backward;
+    } else if (action_name == "turn_left") {
+        action = ChassisAction::TurnLeft;
+    } else if (action_name == "turn_right") {
+        action = ChassisAction::TurnRight;
+    } else {
+        return SendFailure(req, "未知动作，可用：forward/backward/turn_left/turn_right/stop");
+    }
+
+    if (action == ChassisAction::Stop) {
+        speed_percent = g_chassis_speed_percent.load();
+        duration_ms = 0;
+    } else {
+        speed_percent =
+            std::clamp(speed_percent, kChassisMinSpeedPercent, kChassisMaxSpeedPercent);
+        duration_ms = duration_ms > 0 ? std::clamp(duration_ms, 100, kChassisMaxDurationMs)
+                                      : kChassisDefaultDurationMs;
+    }
+
+    if (!self.chassis_control_(action, speed_percent, duration_ms)) {
+        return SendFailure(req, "动作执行失败", "503 Service Unavailable");
+    }
+
+    g_chassis_action.store(static_cast<int>(action));
+    g_chassis_speed_percent.store(speed_percent);
+    g_chassis_until_us.store(action == ChassisAction::Stop
+                                 ? 0
+                                 : esp_timer_get_time() +
+                                       static_cast<int64_t>(duration_ms) * 1000);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    cJSON_AddStringToObject(resp, "action", action_name.c_str());
+    cJSON_AddNumberToObject(resp, "speed_percent", speed_percent);
+    cJSON_AddNumberToObject(resp, "duration_ms", duration_ms);
+    cJSON_AddBoolToObject(resp, "moving", action != ChassisAction::Stop);
+    return SendJsonBody(req, JsonToString(resp));
 }
 
 esp_err_t WebServer::AlarmsGetHandler(httpd_req_t* req) {

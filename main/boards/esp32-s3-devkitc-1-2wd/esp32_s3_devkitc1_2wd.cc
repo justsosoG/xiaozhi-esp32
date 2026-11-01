@@ -6,6 +6,7 @@
 #include "led/single_led.h"
 #include "button.h"
 #include "mcp_server.h"
+#include "web_server.h"
 #include <driver/i2c_master.h>
 #include <driver/ledc.h>
 #include <driver/spi_common.h>
@@ -320,6 +321,30 @@ private:
         mcp.AddTool("self.chassis.stop", "立即停止小车", PropertyList(), [this](const PropertyList&) -> ReturnValue {
             motors_.Stop(); return true;
         });
+
+        // 网页遥控：/api/chassis -> MotorController。回调在 HTTP 任务中执行，
+        // MotorController 内部有互斥锁，可安全跨任务调用。
+        WebServer::GetInstance().SetChassisControlCallback(
+            [this](ChassisAction action, int speed_percent, int duration_ms) {
+                switch (action) {
+                    case ChassisAction::Forward:
+                        motors_.Move(Motion::Forward, duration_ms, speed_percent);
+                        return true;
+                    case ChassisAction::Backward:
+                        motors_.Move(Motion::Backward, duration_ms, speed_percent);
+                        return true;
+                    case ChassisAction::TurnLeft:
+                        motors_.Move(Motion::Left, duration_ms, speed_percent);
+                        return true;
+                    case ChassisAction::TurnRight:
+                        motors_.Move(Motion::Right, duration_ms, speed_percent);
+                        return true;
+                    case ChassisAction::Stop:
+                        motors_.Stop();
+                        return true;
+                }
+                return false;
+            });
     }
     void RegisterMove(McpServer& mcp, const char* name, const char* description, Motion motion,
                       const PropertyList& properties) {
